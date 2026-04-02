@@ -1,0 +1,251 @@
+:root {
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --line: #d6dbe1;
+  --text: #1e2732;
+  --muted: #617083;
+  --accent: #1b5a87;
+  --danger: #8d2b2b;
+  --warn: #8a5a00;
+  --ok: #2d6f3e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.app-header {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.35rem;
+}
+
+.subhead {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  padding: 0.7rem 1.5rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.tab-btn {
+  border: 1px solid var(--line);
+  padding: 0.45rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  background: #fefefe;
+}
+
+.tab-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+main {
+  padding: 1.2rem 1.5rem 2rem;
+}
+
+.section {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.section h2,
+.section h3 {
+  margin: 0 0 0.8rem;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(160px, 1fr));
+  gap: 0.7rem;
+}
+
+.grid.two {
+  grid-template-columns: repeat(2, minmax(200px, 1fr));
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+}
+
+input,
+select,
+textarea {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.45rem 0.5rem;
+  color: var(--text);
+  background: #fff;
+}
+
+textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
+button {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 6px;
+  padding: 0.45rem 0.75rem;
+  cursor: pointer;
+}
+
+button.primary {
+  border-color: var(--accent);
+  color: #fff;
+  background: var(--accent);
+}
+
+button.warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+button.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+th,
+td {
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  padding: 0.5rem;
+  vertical-align: top;
+}
+
+th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.toolbar {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.8rem;
+}
+
+.inline {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.kpi {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  gap: 0.7rem;
+}
+
+.kpi > div {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.7rem;
+}
+
+.kpi strong {
+  display: block;
+  font-size: 1.2rem;
+  margin-top: 0.35rem;
+}
+
+.badge {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.77rem;
+  padding: 0.15rem 0.45rem;
+  white-space: nowrap;
+}
+
+.badge.stalled {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.badge.watch {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.badge.ok {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.status-actions {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+@media print {
+  body {
+    background: #fff;
+  }
+
+  .tabs,
+  .app-header,
+  .no-print {
+    display: none !important;
+  }
+
+  main {
+    padding: 0;
+  }
+
+  .slip {
+    border: 1px solid #000;
+    padding: 0.4rem;
+    margin-bottom: 0.4rem;
+    page-break-inside: avoid;
+  }
+}
