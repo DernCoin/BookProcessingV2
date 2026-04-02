@@ -41,15 +41,33 @@ render();
 
 function loadState() {
   const raw = localStorage.getItem(STORAGE_KEY);
-  if (raw) return JSON.parse(raw);
-
   const now = new Date().toISOString();
-  return {
+  const defaults = {
     items: [],
     batches: [],
     history: [],
     lookupOverrides: { statuses: [], sources: [] },
     createdAt: now
+  };
+  if (!raw) return defaults;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return defaults;
+  }
+
+  return {
+    ...defaults,
+    ...parsed,
+    items: Array.isArray(parsed?.items) ? parsed.items : [],
+    batches: Array.isArray(parsed?.batches) ? parsed.batches : [],
+    history: Array.isArray(parsed?.history) ? parsed.history : [],
+    lookupOverrides: {
+      statuses: Array.isArray(parsed?.lookupOverrides?.statuses) ? parsed.lookupOverrides.statuses : [],
+      sources: Array.isArray(parsed?.lookupOverrides?.sources) ? parsed.lookupOverrides.sources : []
+    }
   };
 }
 
