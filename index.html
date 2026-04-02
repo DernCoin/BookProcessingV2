@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Library Acquisitions & Processing</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>Library Acquisitions & Processing</h1>
+      <p class="subhead">Staff workflow tracker for intake, decisions, processing, and shelving.</p>
+    </header>
+
+    <nav class="tabs" id="tabs"></nav>
+
+    <main id="app"></main>
+
+    <template id="item-row-template">
+      <tr>
+        <td data-field="title"></td>
+        <td data-field="author"></td>
+        <td data-field="source"></td>
+        <td data-field="status"></td>
+        <td data-field="updated"></td>
+        <td data-field="aging"></td>
+        <td data-field="actions"></td>
+      </tr>
+    </template>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
