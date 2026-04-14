@@ -99,6 +99,51 @@ function coverImageForIsbn(isbn = "") {
   return `https://covers.openlibrary.org/b/isbn/${normalized}-M.jpg`;
 }
 
+const coverLookupCache = new Map();
+function normalizeCoverLookupKey(title = "", author = "") {
+  return `${String(title).trim().toLowerCase()}::${String(author).trim().toLowerCase()}`;
+}
+
+async function coverImageForItem({ isbn = "", title = "", author = "" } = {}) {
+  const byIsbn = coverImageForIsbn(isbn);
+  if (byIsbn) return byIsbn;
+
+  const cleanTitle = String(title).trim();
+  const cleanAuthor = String(author).trim();
+  if (!cleanTitle && !cleanAuthor) return "";
+
+  const cacheKey = normalizeCoverLookupKey(cleanTitle, cleanAuthor);
+  if (coverLookupCache.has(cacheKey)) return coverLookupCache.get(cacheKey);
+
+  try {
+    const params = new URLSearchParams({
+      limit: "1",
+      fields: "cover_i,isbn,title,author_name"
+    });
+    if (cleanTitle) params.set("title", cleanTitle);
+    if (cleanAuthor) params.set("author", cleanAuthor);
+
+    const res = await fetch(`https://openlibrary.org/search.json?${params.toString()}`);
+    if (!res.ok) throw new Error(`Cover lookup failed: ${res.status}`);
+    const data = await res.json();
+    const doc = data?.docs?.[0];
+
+    let coverUrl = "";
+    if (doc?.cover_i) {
+      coverUrl = `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`;
+    } else if (Array.isArray(doc?.isbn) && doc.isbn[0]) {
+      coverUrl = coverImageForIsbn(doc.isbn[0]);
+    }
+
+    coverLookupCache.set(cacheKey, coverUrl);
+    return coverUrl;
+  } catch (err) {
+    console.warn("Cover lookup by title/author failed", err);
+    coverLookupCache.set(cacheKey, "");
+    return "";
+  }
+}
+
 function ageDays(item) {
   const start = new Date(item.dateReceived || item.orderDate || item.createdAt || Date.now());
   return Math.floor((Date.now() - start.getTime()) / 86400000);
@@ -570,7 +615,7 @@ function renderOrders() {
     });
   });
 
-  form.addEventListener("submit", (e) => {
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const rowEls = [...document.querySelectorAll("#order-items-list .order-item-row")];
     const orderItems = rowEls.map((row) => ({
@@ -609,7 +654,18 @@ function renderOrders() {
       return;
     }
 
-    orderItems.forEach((entry) => {
+    const preparedItems = await Promise.all(
+      orderItems.map(async (entry) => ({
+        ...entry,
+        coverImage: await coverImageForItem({
+          isbn: entry.isbn,
+          title: entry.title,
+          author: entry.author
+        })
+      }))
+    );
+
+    preparedItems.forEach((entry) => {
       const item = {
         id: id("item"),
         orderId: order.id,
@@ -622,7 +678,7 @@ function renderOrders() {
         donor: order.donor,
         dateReceived: order.dateReceived,
         notes: order.notes,
-        coverImage: coverImageForIsbn(entry.isbn),
+        coverImage: entry.coverImage,
         createdAt: now,
         updatedAt: now,
         ...entry
@@ -750,7 +806,7 @@ function renderBulkDonations() {
     renderBulkDonations();
   });
 
-  document.getElementById("quick-add").addEventListener("submit", (e) => {
+  document.getElementById("quick-add").addEventListener("submit", async (e) => {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     const item = {
@@ -761,7 +817,7 @@ function renderBulkDonations() {
       dateReceived: isoDate()
     };
     fd.forEach((v, k) => (item[k] = String(v).trim()));
-    item.coverImage = coverImageForIsbn(item.isbn);
+    item.coverImage = await coverImageForItem(item);
     state.items.push(item);
     state.history.push({
       id: id("hist"),
@@ -974,11 +1030,11 @@ function renderItemDetail(itemId) {
   });
   document.addEventListener("keydown", escClose);
 
-  document.getElementById("edit-form").addEventListener("submit", (e) => {
+  document.getElementById("edit-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     fd.forEach((v, k) => (item[k] = String(v).trim()));
-    item.coverImage = coverImageForIsbn(item.isbn);
+    item.coverImage = await coverImageForItem(item);
     item.updatedAt = new Date().toISOString();
     state.history.push({ id: id("hist"), itemId: item.id, timestamp: item.updatedAt, action: "Details edited" });
     saveState();
@@ -1174,8 +1230,78 @@ function renderPrintSlips() {
       .join("");
   };
 
+  const printSelectedSlips = () => {
+    const ids = [...document.querySelectorAll(".slip-check:checked")].map((el) => el.value);
+    const slips = state.items.filter((i) => ids.includes(i.id));
+    if (slips.length === 0) {
+      alert("Select at least one slip to print.");
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
+    if (!printWindow) {
+      alert("Pop-up blocked. Please allow pop-ups to print slips.");
+      return;
+    }
+
+    const slipsHtml = slips
+      .map(
+        (i) => `<article class="slip">
+      <header class="slip-header">
+        <strong>${escapeHtml(i.title || "Untitled")}</strong>
+      </header>
+      ${i.coverImage ? `<img class="detail-cover" src="${escapeHtml(i.coverImage)}" alt="Cover for ${escapeHtml(i.title || "item")}" />` : ""}
+      <div class="slip-meta">
+        <span><strong>Author:</strong> ${escapeHtml(i.author || "—")}</span>
+        <span><strong>ISBN:</strong> ${escapeHtml(i.isbn || "—")}</span>
+        <span><strong>Source:</strong> ${escapeHtml(i.source || "—")}</span>
+        <span><strong>Order #:</strong> ${escapeHtml(i.orderNumber || "—")}</span>
+        <span><strong>Vendor/Donor:</strong> ${escapeHtml(i.vendor || i.donor || "—")}</span>
+        <span><strong>Received:</strong> ${escapeHtml(i.dateReceived || i.orderDate || "—")}</span>
+      </div>
+      ${
+        i.memorialInfo || i.adoptedAuthorInfo || i.slipNotes
+          ? `<div class="slip-notes">
+            ${i.memorialInfo ? `<div><strong>Memorial:</strong> ${escapeHtml(i.memorialInfo)}</div>` : ""}
+            ${i.adoptedAuthorInfo ? `<div><strong>Adopted Author:</strong> ${escapeHtml(i.adoptedAuthorInfo)}</div>` : ""}
+            ${i.slipNotes ? `<div><strong>Slip Notes:</strong> ${escapeHtml(i.slipNotes)}</div>` : ""}
+          </div>`
+          : ""
+      }
+      <div class="slip-staff">
+        <div>Cataloged by: ____________________</div>
+        <div>Shelved by: ____________________</div>
+      </div>
+    </article>`
+      )
+      .join("");
+
+    printWindow.document.write(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Processing Slips</title>
+  <style>
+    @page { size: auto; margin: 6mm; }
+    body { margin: 0; padding: 0; font-family: Arial, sans-serif; color: #000; }
+    .slip { border: 1px solid #000; padding: 4mm; margin: 0 0 3mm; page-break-inside: avoid; }
+    .slip-header { margin-bottom: 2mm; }
+    .slip-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 1mm 3mm; font-size: 11px; }
+    .slip-notes { border-top: 1px dashed #000; margin-top: 2mm; padding-top: 2mm; font-size: 11px; }
+    .slip-staff { border-top: 1px solid #000; margin-top: 2mm; padding-top: 2mm; display: grid; gap: 2mm; font-size: 11px; }
+    .detail-cover { width: 24mm; height: 35mm; object-fit: cover; border: 1px solid #000; margin-bottom: 2mm; }
+  </style>
+</head>
+<body>${slipsHtml}</body>
+</html>`);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+    printWindow.onafterprint = () => printWindow.close();
+  };
+
   document.getElementById("slip-search").addEventListener("input", renderPicker);
-  document.getElementById("print-btn").addEventListener("click", () => window.print());
+  document.getElementById("print-btn").addEventListener("click", printSelectedSlips);
 
   renderPicker();
   appEl.addEventListener("change", (e) => {
