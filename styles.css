@@ -305,6 +305,13 @@ th {
   align-items: end;
 }
 
+.existing-items-list {
+  margin: 0.25rem 0 0.75rem;
+  padding-left: 1.2rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .thumb {
   width: 46px;
   height: 64px;
@@ -325,6 +332,10 @@ th {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #fff;
+}
+
+.item-detail-modal {
+  width: min(1100px, 100%);
 }
 
 @media print {

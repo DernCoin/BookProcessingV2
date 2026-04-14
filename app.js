@@ -206,7 +206,10 @@ function renderOrders() {
             ${
               order.archivedAt
                 ? `<span class="badge ok">Archived</span>`
-                : `<button class="primary" data-archive-order="${order.id}" ${canArchive ? "" : "disabled"}>Archive</button>`
+                : `<div class="inline">
+                    <button type="button" data-edit-order="${order.id}">Edit</button>
+                    <button class="primary" data-archive-order="${order.id}" ${canArchive ? "" : "disabled"}>Archive</button>
+                  </div>`
             }
           </td>
         </tr>`;
@@ -244,7 +247,7 @@ function renderOrders() {
     <div id="order-modal" class="modal-backdrop" hidden>
       <section class="modal">
         <div class="inline" style="justify-content: space-between;">
-          <h3>Create Order</h3>
+          <h3 id="order-modal-title">Create Order</h3>
           <button id="close-order-modal" type="button">Close</button>
         </div>
         <form id="order-form" class="grid">
@@ -263,8 +266,9 @@ function renderOrders() {
           <label style="grid-column: span 4;">Order Notes<textarea name="notes"></textarea></label>
 
           <div style="grid-column: span 4;">
+            <div id="existing-order-items"></div>
             <div class="inline" style="justify-content: space-between;">
-              <h4>Items in this order</h4>
+              <h4 id="order-items-heading">Items in this order</h4>
               <button id="add-order-item" type="button">Add Item Row</button>
             </div>
             <div id="order-items-list" class="order-items-list"></div>
@@ -272,7 +276,7 @@ function renderOrders() {
 
           <div class="inline" style="grid-column: span 4; justify-content: flex-end;">
             <button type="button" id="cancel-order-create">Cancel</button>
-            <button type="submit" class="primary">Save Order</button>
+            <button type="submit" id="save-order-btn" class="primary">Save Order</button>
           </div>
         </form>
       </section>
@@ -280,6 +284,25 @@ function renderOrders() {
   `;
 
   const modal = document.getElementById("order-modal");
+  const form = document.getElementById("order-form");
+  const titleEl = document.getElementById("order-modal-title");
+  const saveBtn = document.getElementById("save-order-btn");
+  const existingItemsEl = document.getElementById("existing-order-items");
+  let editingOrderId = "";
+
+  const resetOrderForm = () => {
+    form.reset();
+    form.elements.orderDate.value = isoDate();
+    form.elements.status.value = "Ordered";
+    form.elements.source.value = sources[0] || "";
+    document.getElementById("order-items-list").innerHTML = "";
+    existingItemsEl.innerHTML = "";
+    editingOrderId = "";
+    titleEl.textContent = "Create Order";
+    saveBtn.textContent = "Save Order";
+    document.getElementById("order-items-heading").textContent = "Items in this order";
+  };
+
   const openModal = () => {
     modal.removeAttribute("hidden");
     modal.classList.add("is-open");
@@ -287,6 +310,7 @@ function renderOrders() {
   const closeModal = () => {
     modal.setAttribute("hidden", "");
     modal.classList.remove("is-open");
+    resetOrderForm();
   };
 
   const addItemRow = () => {
@@ -311,6 +335,7 @@ function renderOrders() {
   };
 
   document.getElementById("open-order-modal").addEventListener("click", () => {
+    resetOrderForm();
     openModal();
     if (!document.querySelector("#order-items-list .order-item-row")) addItemRow();
   });
@@ -348,9 +373,42 @@ function renderOrders() {
     });
   });
 
-  document.getElementById("order-form").addEventListener("submit", (e) => {
+  document.querySelectorAll("button[data-edit-order]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const order = state.orders.find((entry) => entry.id === btn.dataset.editOrder);
+      if (!order) return;
+      const existingItems = state.items.filter((item) => item.orderId === order.id);
+
+      resetOrderForm();
+      editingOrderId = order.id;
+      titleEl.textContent = `Edit Order ${order.orderNumber || order.id}`;
+      saveBtn.textContent = "Save Order Changes";
+      document.getElementById("order-items-heading").textContent = "Add additional items";
+      existingItemsEl.innerHTML = `
+        <p class="subhead"><strong>${existingItems.length}</strong> existing item(s) already on this order.</p>
+        ${existingItems.length ? `<ul class="existing-items-list">${existingItems.map((item) => `<li>${escapeHtml(item.title || "Untitled")} — ${escapeHtml(item.author || "Unknown")}</li>`).join("")}</ul>` : ""}
+      `;
+
+      [
+        "orderNumber",
+        "orderDate",
+        "vendor",
+        "orderPrice",
+        "status",
+        "source",
+        "donor",
+        "dateReceived",
+        "notes"
+      ].forEach((key) => {
+        form.elements[key].value = order[key] || "";
+      });
+
+      openModal();
+    });
+  });
+
+  form.addEventListener("submit", (e) => {
     e.preventDefault();
-    const form = e.currentTarget;
     const rowEls = [...document.querySelectorAll("#order-items-list .order-item-row")];
     const orderItems = rowEls.map((row) => ({
       title: row.querySelector('[name="itemTitle"]').value.trim(),
@@ -369,15 +427,24 @@ function renderOrders() {
 
     const fd = new FormData(form);
     const now = new Date().toISOString();
-    const order = {
-      id: id("order"),
-      createdAt: now,
-      updatedAt: now,
-      archivedAt: "",
-      itemIds: []
-    };
+    const existingOrder = editingOrderId ? state.orders.find((entry) => entry.id === editingOrderId) : null;
+    const order =
+      existingOrder ||
+      {
+        id: id("order"),
+        createdAt: now,
+        updatedAt: now,
+        archivedAt: "",
+        itemIds: []
+      };
     fd.forEach((v, k) => (order[k] = String(v).trim()));
-    state.orders.push(order);
+    order.updatedAt = now;
+    if (!existingOrder) state.orders.push(order);
+
+    if (!existingOrder && orderItems.length === 0) {
+      alert("Please add at least one item before saving a new order.");
+      return;
+    }
 
     orderItems.forEach((entry) => {
       const item = {
@@ -403,13 +470,29 @@ function renderOrders() {
         id: id("hist"),
         itemId: item.id,
         timestamp: now,
-        action: `Item created from order ${order.orderNumber || order.id} with status ${item.status}`
+        action: existingOrder
+          ? `Item added to existing order ${order.orderNumber || order.id} with status ${item.status}`
+          : `Item created from order ${order.orderNumber || order.id} with status ${item.status}`
       });
     });
 
+    if (existingOrder) {
+      state.items
+        .filter((item) => item.orderId === order.id)
+        .forEach((item) => {
+          item.orderNumber = order.orderNumber;
+          item.orderDate = order.orderDate;
+          item.vendor = order.vendor;
+          item.orderPrice = order.orderPrice;
+          item.source = order.source;
+          item.donor = order.donor;
+          item.dateReceived = order.dateReceived;
+          item.notes = order.notes;
+          item.updatedAt = now;
+        });
+    }
+
     saveState();
-    form.reset();
-    document.getElementById("order-items-list").innerHTML = "";
     closeModal();
     renderOrders();
   });
@@ -659,12 +742,17 @@ function updateStatus(item, status, action) {
 
 function renderItemDetail(itemId) {
   const item = state.items.find((i) => i.id === itemId);
+  if (!item) return;
   const hist = state.history.filter((h) => h.itemId === itemId).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-  appEl.innerHTML = `
-    <section class="section">
+  document.getElementById("item-detail-modal")?.remove();
+  const modal = document.createElement("div");
+  modal.id = "item-detail-modal";
+  modal.className = "modal-backdrop is-open";
+  modal.innerHTML = `
+    <section class="modal item-detail-modal">
       <div class="inline" style="justify-content: space-between;">
-        <h2>Item Detail: ${item.title}</h2>
-        <button id="back">Back</button>
+        <h2>Item Detail: ${escapeHtml(item.title || "Untitled")}</h2>
+        <button id="close-item-detail" type="button">Close</button>
       </div>
       ${
         item.coverImage
@@ -672,10 +760,7 @@ function renderItemDetail(itemId) {
           : ""
       }
       <form id="edit-form" class="grid">
-        <label style="grid-column: span 4;">
-          Cover image URL
-          <input name="coverImage" value="${(item.coverImage || "").replaceAll('"', "&quot;")}" readonly />
-        </label>
+        <label style="grid-column: span 4;">Cover image URL<input name="coverImage" value="${(item.coverImage || "").replaceAll('"', "&quot;")}" readonly /></label>
         <label>title<input name="title" value="${(item.title || "").replaceAll('"', "&quot;")}"/></label>
         <label>author<input name="author" value="${(item.author || "").replaceAll('"', "&quot;")}"/></label>
         <label>isbn<input name="isbn" value="${(item.isbn || "").replaceAll('"', "&quot;")}"/></label>
@@ -689,12 +774,8 @@ function renderItemDetail(itemId) {
         <label>donor<input name="donor" value="${(item.donor || "").replaceAll('"', "&quot;")}"/></label>
         <label>memorialInfo<input name="memorialInfo" value="${(item.memorialInfo || "").replaceAll('"', "&quot;")}"/></label>
         <label>adoptedAuthorInfo<input name="adoptedAuthorInfo" value="${(item.adoptedAuthorInfo || "").replaceAll('"', "&quot;")}"/></label>
-        <label>Status
-          <select name="status">${allStatuses().map((s) => `<option value="${escapeHtml(s)}" ${item.status === s ? "selected" : ""}>${escapeHtml(s)}</option>`).join("")}</select>
-        </label>
-        <label>Source
-          <select name="source">${allSources().map((s) => `<option value="${escapeHtml(s)}" ${item.source === s ? "selected" : ""}>${escapeHtml(s)}</option>`).join("")}</select>
-        </label>
+        <label>Status<select name="status">${allStatuses().map((s) => `<option value="${escapeHtml(s)}" ${item.status === s ? "selected" : ""}>${escapeHtml(s)}</option>`).join("")}</select></label>
+        <label>Source<select name="source">${allSources().map((s) => `<option value="${escapeHtml(s)}" ${item.source === s ? "selected" : ""}>${escapeHtml(s)}</option>`).join("")}</select></label>
         <label>dateReceived<input name="dateReceived" value="${(item.dateReceived || "").replaceAll('"', "&quot;")}"/></label>
         <label>dateCompleted<input name="dateCompleted" value="${(item.dateCompleted || "").replaceAll('"', "&quot;")}"/></label>
         <label>rejectionReason<input name="rejectionReason" value="${(item.rejectionReason || "").replaceAll('"', "&quot;")}"/></label>
@@ -702,26 +783,33 @@ function renderItemDetail(itemId) {
         <label style="grid-column: span 2;">notes<textarea name="notes">${item.notes || ""}</textarea></label>
         <label>processingNotes<textarea name="processingNotes">${item.processingNotes || ""}</textarea></label>
         <label>slipNotes<textarea name="slipNotes">${item.slipNotes || ""}</textarea></label>
-        <div class="inline" style="grid-column: span 4; justify-content: flex-end;">
-          <button class="primary" type="submit">Save Changes</button>
-        </div>
+        <div class="inline" style="grid-column: span 4; justify-content: flex-end;"><button class="primary" type="submit">Save Changes</button></div>
       </form>
-    </section>
-    <section class="section">
-      <h3>Editable History</h3>
-      <div class="table-wrap">
-        <table><thead><tr><th>When</th><th>Action</th></tr></thead>
-        <tbody>${hist.map((h) => `<tr><td>${h.timestamp}</td><td>${h.action}</td></tr>`).join("") || "<tr><td colspan='2'>No history.</td></tr>"}</tbody>
-        </table>
-      </div>
+      <section class="section">
+        <h3>Editable History</h3>
+        <div class="table-wrap">
+          <table><thead><tr><th>When</th><th>Action</th></tr></thead>
+          <tbody>${hist.map((h) => `<tr><td>${h.timestamp}</td><td>${h.action}</td></tr>`).join("") || "<tr><td colspan='2'>No history.</td></tr>"}</tbody></table>
+        </div>
+      </section>
     </section>
   `;
+  document.body.appendChild(modal);
 
-  document.getElementById("back").onclick = () => {
-    activeTab = "Items In Process";
-    renderTabs();
-    render();
+  const escClose = (e) => {
+    if (e.key === "Escape") {
+      closeItemModal();
+    }
   };
+  const closeItemModal = () => {
+    modal.remove();
+    document.removeEventListener("keydown", escClose);
+  };
+  document.getElementById("close-item-detail").onclick = closeItemModal;
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) closeItemModal();
+  });
+  document.addEventListener("keydown", escClose);
 
   document.getElementById("edit-form").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -732,6 +820,8 @@ function renderItemDetail(itemId) {
     state.history.push({ id: id("hist"), itemId: item.id, timestamp: item.updatedAt, action: "Details edited" });
     saveState();
     alert("Updated.");
+    closeItemModal();
+    render();
   });
 }
 
