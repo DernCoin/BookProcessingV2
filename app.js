@@ -156,6 +156,116 @@ function escapeHtml(value = "") {
     .replaceAll("'", "&#39;");
 }
 
+let pdfJsLoaderPromise;
+async function loadPdfJs() {
+  if (!pdfJsLoaderPromise) {
+    pdfJsLoaderPromise = import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.5.136/build/pdf.min.mjs").then((pdfjs) => {
+      pdfjs.GlobalWorkerOptions.workerSrc =
+        "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.5.136/build/pdf.worker.min.mjs";
+      return pdfjs;
+    });
+  }
+  return pdfJsLoaderPromise;
+}
+
+function parseAmazonOrderText(rawText = "") {
+  const lines = rawText
+    .split(/\r?\n/g)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const result = {
+    orderNumber: "",
+    orderDate: "",
+    vendor: "Amazon",
+    source: "Ordered",
+    items: []
+  };
+
+  for (const line of lines) {
+    const orderNumber = line.match(/Amazon\.com order number:\s*([0-9-]+)/i);
+    if (orderNumber) result.orderNumber = orderNumber[1].trim();
+    const orderNumberAlt = line.match(/Details for Order\s*#?\s*([0-9-]+)/i);
+    if (!result.orderNumber && orderNumberAlt) result.orderNumber = orderNumberAlt[1].trim();
+    const orderPlaced = line.match(/Order Placed:\s*([A-Za-z]+\s+\d{1,2},\s+\d{4})/i);
+    if (orderPlaced) {
+      const dt = new Date(orderPlaced[1]);
+      if (!Number.isNaN(dt.getTime())) result.orderDate = isoDate(dt);
+    }
+  }
+
+  const items = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const itemMatch = line.match(/^(\d+)\s+of:\s*(.+)$/i);
+    if (!itemMatch) continue;
+
+    const quantity = Number(itemMatch[1]) || 1;
+    let body = itemMatch[2].trim();
+    let price = "";
+
+    const inlinePrice = body.match(/\$([0-9]+(?:\.[0-9]{2})?)$/);
+    if (inlinePrice) {
+      price = inlinePrice[1];
+      body = body.replace(/\$([0-9]+(?:\.[0-9]{2})?)$/, "").trim();
+    } else {
+      const next = lines[i + 1] || "";
+      const nextPrice = next.match(/^\$([0-9]+(?:\.[0-9]{2})?)$/);
+      if (nextPrice) {
+        price = nextPrice[1];
+        i += 1;
+      }
+    }
+
+    const splitAt = body.lastIndexOf(" , ");
+    const title = splitAt >= 0 ? body.slice(0, splitAt).trim() : body;
+    const author = splitAt >= 0 ? body.slice(splitAt + 3).trim() : "Unknown";
+
+    for (let q = 0; q < quantity; q += 1) {
+      items.push({
+        title,
+        author,
+        purchasePrice: price
+      });
+    }
+  }
+
+  result.items = items;
+  return result;
+}
+
+async function extractTextFromPdf(file) {
+  const pdfjs = await loadPdfJs();
+  const data = new Uint8Array(await file.arrayBuffer());
+  const doc = await pdfjs.getDocument({ data }).promise;
+  const pages = [];
+
+  for (let pageNum = 1; pageNum <= doc.numPages; pageNum += 1) {
+    const page = await doc.getPage(pageNum);
+    const textContent = await page.getTextContent();
+    const grouped = new Map();
+    textContent.items.forEach((item) => {
+      const y = String(Math.round(item.transform[5]));
+      const existing = grouped.get(y) || [];
+      existing.push({
+        x: item.transform[4],
+        str: item.str
+      });
+      grouped.set(y, existing);
+    });
+    const pageLines = [...grouped.entries()]
+      .sort((a, b) => Number(b[0]) - Number(a[0]))
+      .map(([, segs]) =>
+        segs
+          .sort((a, b) => a.x - b.x)
+          .map((segment) => segment.str)
+          .join(" ")
+      );
+    pages.push(pageLines.join("\n"));
+  }
+
+  return pages.join("\n");
+}
+
 function renderDashboard() {
   const items = state.items;
   const incomplete = items.filter((i) => i.status !== "Completed / Shelved");
@@ -301,6 +411,10 @@ function renderOrders() {
     titleEl.textContent = "Create Order";
     saveBtn.textContent = "Save Order";
     document.getElementById("order-items-heading").textContent = "Items in this order";
+    const importInput = document.getElementById("amazon-order-pdf");
+    const importStatus = document.getElementById("amazon-import-status");
+    if (importInput) importInput.value = "";
+    if (importStatus) importStatus.textContent = "";
   };
 
   const openModal = () => {
@@ -313,22 +427,22 @@ function renderOrders() {
     resetOrderForm();
   };
 
-  const addItemRow = () => {
+  const addItemRow = (defaults = {}) => {
     const statuses = allStatuses();
     const row = document.createElement("div");
     row.className = "order-item-row";
     row.innerHTML = `
-      <label>Title<input required name="itemTitle" /></label>
-      <label>Author<input required name="itemAuthor" /></label>
-      <label>ISBN<input name="itemIsbn" /></label>
+      <label>Title<input required name="itemTitle" value="${escapeHtml(defaults.title || "")}" /></label>
+      <label>Author<input required name="itemAuthor" value="${escapeHtml(defaults.author || "")}" /></label>
+      <label>ISBN<input name="itemIsbn" value="${escapeHtml(defaults.isbn || "")}" /></label>
       <label>Format
-        <select name="itemFormat">${LOOKUPS.formats.map((f) => `<option>${f}</option>`).join("")}</select>
+        <select name="itemFormat">${LOOKUPS.formats.map((f) => `<option ${f === (defaults.format || "Hardcover") ? "selected" : ""}>${f}</option>`).join("")}</select>
       </label>
       <label>Status
-        <select name="itemStatus">${statuses.map((s) => `<option ${s === "Ordered" ? "selected" : ""}>${s}</option>`).join("")}</select>
+        <select name="itemStatus">${statuses.map((s) => `<option ${s === (defaults.status || "Ordered") ? "selected" : ""}>${s}</option>`).join("")}</select>
       </label>
-      <label>Purchase Price<input name="itemPurchasePrice" type="number" step="0.01" /></label>
-      <label>Retail Price<input name="itemRetailPrice" type="number" step="0.01" /></label>
+      <label>Purchase Price<input name="itemPurchasePrice" type="number" step="0.01" value="${escapeHtml(defaults.purchasePrice || "")}" /></label>
+      <label>Retail Price<input name="itemRetailPrice" type="number" step="0.01" value="${escapeHtml(defaults.retailPrice || "")}" /></label>
       <button type="button" class="danger remove-order-item">Remove</button>
     `;
     document.getElementById("order-items-list").appendChild(row);
@@ -342,6 +456,16 @@ function renderOrders() {
   document.getElementById("close-order-modal").addEventListener("click", closeModal);
   document.getElementById("cancel-order-create").addEventListener("click", closeModal);
   document.getElementById("add-order-item").addEventListener("click", addItemRow);
+  document.getElementById("order-items-heading").insertAdjacentHTML(
+    "afterend",
+    `
+    <div class="inline" style="margin-bottom:0.45rem;">
+      <input type="file" id="amazon-order-pdf" accept=".pdf,application/pdf" />
+      <button type="button" id="import-amazon-pdf">Import Amazon PDF</button>
+      <span id="amazon-import-status" class="subhead"></span>
+    </div>
+  `
+  );
   modal.addEventListener("click", (e) => {
     if (e.target === modal) closeModal();
   });
@@ -354,6 +478,45 @@ function renderOrders() {
     const rows = document.querySelectorAll("#order-items-list .order-item-row");
     if (rows.length === 1) return;
     e.target.closest(".order-item-row")?.remove();
+  });
+
+  document.getElementById("import-amazon-pdf").addEventListener("click", async () => {
+    const fileInput = document.getElementById("amazon-order-pdf");
+    const statusEl = document.getElementById("amazon-import-status");
+    const file = fileInput.files?.[0];
+    if (!file) {
+      statusEl.textContent = "Choose a PDF file first.";
+      return;
+    }
+    statusEl.textContent = "Reading PDF...";
+    try {
+      const text = await extractTextFromPdf(file);
+      const parsed = parseAmazonOrderText(text);
+      if (!parsed.items.length) {
+        statusEl.textContent = "No Amazon order items found in the PDF.";
+        return;
+      }
+
+      if (parsed.orderNumber) form.elements.orderNumber.value = parsed.orderNumber;
+      if (parsed.orderDate) form.elements.orderDate.value = parsed.orderDate;
+      form.elements.vendor.value = "Amazon";
+      form.elements.source.value = "Ordered";
+      if (!form.elements.status.value) form.elements.status.value = "Ordered";
+
+      const list = document.getElementById("order-items-list");
+      list.innerHTML = "";
+      parsed.items.forEach((item) => {
+        addItemRow({
+          ...item,
+          format: "Hardcover",
+          status: "Ordered"
+        });
+      });
+      statusEl.textContent = `Imported ${parsed.items.length} item(s) from ${file.name}.`;
+    } catch (error) {
+      console.error(error);
+      statusEl.textContent = "Failed to import PDF. Please verify it is an Amazon order details PDF.";
+    }
   });
 
   document.querySelectorAll("button[data-archive-order]").forEach((btn) => {
