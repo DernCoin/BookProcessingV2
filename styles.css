@@ -305,6 +305,28 @@ th {
   align-items: end;
 }
 
+.thumb {
+  width: 46px;
+  height: 64px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+}
+
+.detail-cover-wrap {
+  margin-bottom: 0.75rem;
+}
+
+.detail-cover {
+  width: 96px;
+  height: 140px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
 @media print {
   body {
     background: #fff;

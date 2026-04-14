@@ -93,6 +93,12 @@ function allSources() {
   return [...new Set([...LOOKUPS.sources, ...state.lookupOverrides.sources])];
 }
 
+function coverImageForIsbn(isbn = "") {
+  const normalized = String(isbn).replace(/[^0-9Xx]/g, "").toUpperCase();
+  if (!normalized) return "";
+  return `https://covers.openlibrary.org/b/isbn/${normalized}-M.jpg`;
+}
+
 function ageDays(item) {
   const start = new Date(item.dateReceived || item.orderDate || item.createdAt || Date.now());
   return Math.floor((Date.now() - start.getTime()) / 86400000);
@@ -284,6 +290,7 @@ function renderOrders() {
   };
 
   const addItemRow = () => {
+    const statuses = allStatuses();
     const row = document.createElement("div");
     row.className = "order-item-row";
     row.innerHTML = `
@@ -293,6 +300,10 @@ function renderOrders() {
       <label>Format
         <select name="itemFormat">${LOOKUPS.formats.map((f) => `<option>${f}</option>`).join("")}</select>
       </label>
+      <label>Status
+        <select name="itemStatus">${statuses.map((s) => `<option ${s === "Ordered" ? "selected" : ""}>${s}</option>`).join("")}</select>
+      </label>
+      <label>Purchase Price<input name="itemPurchasePrice" type="number" step="0.01" /></label>
       <label>Retail Price<input name="itemRetailPrice" type="number" step="0.01" /></label>
       <button type="button" class="danger remove-order-item">Remove</button>
     `;
@@ -346,6 +357,8 @@ function renderOrders() {
       author: row.querySelector('[name="itemAuthor"]').value.trim(),
       isbn: row.querySelector('[name="itemIsbn"]').value.trim(),
       format: row.querySelector('[name="itemFormat"]').value.trim(),
+      status: row.querySelector('[name="itemStatus"]').value.trim(),
+      purchasePrice: row.querySelector('[name="itemPurchasePrice"]').value.trim(),
       retailPrice: row.querySelector('[name="itemRetailPrice"]').value.trim()
     }));
 
@@ -374,11 +387,12 @@ function renderOrders() {
         orderDate: order.orderDate,
         vendor: order.vendor,
         orderPrice: order.orderPrice,
-        status: order.status,
+        status: entry.status || order.status,
         source: order.source,
         donor: order.donor,
         dateReceived: order.dateReceived,
         notes: order.notes,
+        coverImage: coverImageForIsbn(entry.isbn),
         createdAt: now,
         updatedAt: now,
         ...entry
@@ -454,9 +468,9 @@ function renderBulkDonations() {
         </label>
         <label>Status
           <select name="status">
-            <option>Being considered</option>
-            <option>Approved</option>
-            <option>Rejected</option>
+            ${allStatuses()
+              .map((status) => `<option value="${escapeHtml(status)}" ${status === "Being considered" ? "selected" : ""}>${escapeHtml(status)}</option>`)
+              .join("")}
           </select>
         </label>
         <label>Rejection Reason<input name="rejectionReason" /></label>
@@ -501,6 +515,7 @@ function renderBulkDonations() {
       dateReceived: isoDate()
     };
     fd.forEach((v, k) => (item[k] = String(v).trim()));
+    item.coverImage = coverImageForIsbn(item.isbn);
     state.items.push(item);
     state.history.push({
       id: id("hist"),
@@ -557,11 +572,12 @@ function renderItemsInProcess() {
 }
 
 function itemsTable(items) {
+  const statuses = allStatuses();
   return `
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Title</th><th>Author</th><th>Source</th><th>Status</th><th>Updated</th><th>Aging</th><th>Actions</th></tr>
+          <tr><th>Cover</th><th>Title</th><th>Author</th><th>Source</th><th>Status</th><th>Updated</th><th>Aging</th><th>Actions</th></tr>
         </thead>
         <tbody>
           ${
@@ -569,23 +585,27 @@ function itemsTable(items) {
               .map((item) => {
                 const days = ageDays(item);
                 return `<tr>
+                  <td>${item.coverImage ? `<img class="thumb" src="${escapeHtml(item.coverImage)}" alt="Cover for ${escapeHtml(item.title || "item")}" loading="lazy" />` : "—"}</td>
                   <td>${item.title || ""}</td>
                   <td>${item.author || ""}</td>
                   <td>${item.source || ""}</td>
-                  <td>${item.status || ""}</td>
+                  <td>
+                    <select data-action="status-select" data-id="${item.id}">
+                      ${statuses.map((status) => `<option value="${escapeHtml(status)}" ${item.status === status ? "selected" : ""}>${escapeHtml(status)}</option>`).join("")}
+                    </select>
+                  </td>
                   <td>${(item.updatedAt || item.createdAt || "").slice(0, 10)}</td>
                   <td>${agingBadge(days, item.status === "Completed / Shelved")}</td>
                   <td>
                     <div class="status-actions">
                       <button data-action="view" data-id="${item.id}">Details</button>
-                      <button data-action="status" data-id="${item.id}">Move</button>
                       <button data-action="damaged" data-id="${item.id}" class="warn">Damaged</button>
                       <button data-action="reject" data-id="${item.id}" class="danger">Reject</button>
                     </div>
                   </td>
                 </tr>`;
               })
-              .join("") || `<tr><td colspan="7">No items found.</td></tr>`
+              .join("") || `<tr><td colspan="8">No items found.</td></tr>`
           }
         </tbody>
       </table>
@@ -593,6 +613,14 @@ function itemsTable(items) {
 }
 
 function wireRowActions() {
+  document.querySelectorAll('select[data-action="status-select"]').forEach((selectEl) => {
+    selectEl.addEventListener("change", () => {
+      const item = state.items.find((i) => i.id === selectEl.dataset.id);
+      if (!item) return;
+      updateStatus(item, selectEl.value, "Status selected from dropdown");
+    });
+  });
+
   document.querySelectorAll("button[data-action]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const item = state.items.find((i) => i.id === btn.dataset.id);
@@ -602,12 +630,6 @@ function wireRowActions() {
       if (action === "view") {
         renderItemDetail(item.id);
         return;
-      }
-
-      if (action === "status") {
-        const next = prompt(`Enter new status for ${item.title}`, item.status);
-        if (!next) return;
-        updateStatus(item, next, "Manual move");
       }
 
       if (action === "damaged") {
@@ -644,32 +666,39 @@ function renderItemDetail(itemId) {
         <h2>Item Detail: ${item.title}</h2>
         <button id="back">Back</button>
       </div>
+      ${
+        item.coverImage
+          ? `<div class="detail-cover-wrap"><img class="detail-cover" src="${escapeHtml(item.coverImage)}" alt="Cover for ${escapeHtml(item.title || "item")}" /></div>`
+          : ""
+      }
       <form id="edit-form" class="grid">
-        ${[
-          "title",
-          "author",
-          "isbn",
-          "format",
-          "orderNumber",
-          "orderDate",
-          "vendor",
-          "orderPrice",
-          "retailPrice",
-          "donor",
-          "memorialInfo",
-          "adoptedAuthorInfo",
-          "status",
-          "source",
-          "dateReceived",
-          "dateCompleted",
-          "rejectionReason",
-          "damageNotes"
-        ]
-          .map(
-            (k) =>
-              `<label>${k}<input name="${k}" value="${(item[k] || "").replaceAll('"', "&quot;")}"/></label>`
-          )
-          .join("")}
+        <label style="grid-column: span 4;">
+          Cover image URL
+          <input name="coverImage" value="${(item.coverImage || "").replaceAll('"', "&quot;")}" readonly />
+        </label>
+        <label>title<input name="title" value="${(item.title || "").replaceAll('"', "&quot;")}"/></label>
+        <label>author<input name="author" value="${(item.author || "").replaceAll('"', "&quot;")}"/></label>
+        <label>isbn<input name="isbn" value="${(item.isbn || "").replaceAll('"', "&quot;")}"/></label>
+        <label>format<input name="format" value="${(item.format || "").replaceAll('"', "&quot;")}"/></label>
+        <label>orderNumber<input name="orderNumber" value="${(item.orderNumber || "").replaceAll('"', "&quot;")}"/></label>
+        <label>orderDate<input name="orderDate" value="${(item.orderDate || "").replaceAll('"', "&quot;")}"/></label>
+        <label>vendor<input name="vendor" value="${(item.vendor || "").replaceAll('"', "&quot;")}"/></label>
+        <label>orderPrice<input name="orderPrice" value="${(item.orderPrice || "").replaceAll('"', "&quot;")}"/></label>
+        <label>purchasePrice<input name="purchasePrice" value="${(item.purchasePrice || "").replaceAll('"', "&quot;")}"/></label>
+        <label>retailPrice<input name="retailPrice" value="${(item.retailPrice || "").replaceAll('"', "&quot;")}"/></label>
+        <label>donor<input name="donor" value="${(item.donor || "").replaceAll('"', "&quot;")}"/></label>
+        <label>memorialInfo<input name="memorialInfo" value="${(item.memorialInfo || "").replaceAll('"', "&quot;")}"/></label>
+        <label>adoptedAuthorInfo<input name="adoptedAuthorInfo" value="${(item.adoptedAuthorInfo || "").replaceAll('"', "&quot;")}"/></label>
+        <label>Status
+          <select name="status">${allStatuses().map((s) => `<option value="${escapeHtml(s)}" ${item.status === s ? "selected" : ""}>${escapeHtml(s)}</option>`).join("")}</select>
+        </label>
+        <label>Source
+          <select name="source">${allSources().map((s) => `<option value="${escapeHtml(s)}" ${item.source === s ? "selected" : ""}>${escapeHtml(s)}</option>`).join("")}</select>
+        </label>
+        <label>dateReceived<input name="dateReceived" value="${(item.dateReceived || "").replaceAll('"', "&quot;")}"/></label>
+        <label>dateCompleted<input name="dateCompleted" value="${(item.dateCompleted || "").replaceAll('"', "&quot;")}"/></label>
+        <label>rejectionReason<input name="rejectionReason" value="${(item.rejectionReason || "").replaceAll('"', "&quot;")}"/></label>
+        <label>damageNotes<input name="damageNotes" value="${(item.damageNotes || "").replaceAll('"', "&quot;")}"/></label>
         <label style="grid-column: span 2;">notes<textarea name="notes">${item.notes || ""}</textarea></label>
         <label>processingNotes<textarea name="processingNotes">${item.processingNotes || ""}</textarea></label>
         <label>slipNotes<textarea name="slipNotes">${item.slipNotes || ""}</textarea></label>
@@ -698,6 +727,7 @@ function renderItemDetail(itemId) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     fd.forEach((v, k) => (item[k] = String(v).trim()));
+    item.coverImage = coverImageForIsbn(item.isbn);
     item.updatedAt = new Date().toISOString();
     state.history.push({ id: id("hist"), itemId: item.id, timestamp: item.updatedAt, action: "Details edited" });
     saveState();
@@ -864,6 +894,7 @@ function renderPrintSlips() {
         <strong>${i.title}</strong>
         <span class="badge">${i.status || "No status"}</span>
       </header>
+      ${i.coverImage ? `<img class="detail-cover" src="${escapeHtml(i.coverImage)}" alt="Cover for ${escapeHtml(i.title || "item")}" />` : ""}
       <div class="slip-meta">
         <span><strong>Author:</strong> ${i.author || "—"}</span>
         <span><strong>ISBN:</strong> ${i.isbn || "—"}</span>
