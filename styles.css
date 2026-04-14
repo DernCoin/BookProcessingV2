@@ -238,6 +238,10 @@ th {
   z-index: 10;
 }
 
+.modal-backdrop[hidden] {
+  display: none;
+}
+
 .modal {
   width: min(980px, 100%);
   max-height: 92vh;
@@ -246,6 +250,44 @@ th {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 1rem;
+}
+
+.slip {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+  background: #fff;
+}
+
+.slip-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.slip-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 0.2rem 0.75rem;
+  font-size: 0.9rem;
+}
+
+.slip-notes {
+  border-top: 1px dashed var(--line);
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  font-size: 0.9rem;
+}
+
+.slip-staff {
+  border-top: 1px solid var(--line);
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  display: grid;
+  gap: 0.35rem;
 }
 
 .order-items-list {
@@ -280,8 +322,19 @@ th {
 
   .slip {
     border: 1px solid #000;
-    padding: 0.4rem;
-    margin-bottom: 0.4rem;
+    border-radius: 0;
+    padding: 0.35rem;
+    margin-bottom: 0.3rem;
     page-break-inside: avoid;
+  }
+
+  .slip-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    font-size: 0.82rem;
+  }
+
+  .slip-notes,
+  .slip-staff {
+    font-size: 0.82rem;
   }
 }
