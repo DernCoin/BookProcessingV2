@@ -211,7 +211,7 @@ function renderOrders() {
     <section class="section">
       <div class="inline" style="justify-content: space-between;">
         <h2>Orders Overview</h2>
-        <button id="open-order-modal" class="primary">Add Order</button>
+        <button id="open-order-modal" class="primary" type="button">Add Order</button>
       </div>
       <p class="subhead">Create one order and add multiple items that share the same order details.</p>
       <div class="table-wrap">
@@ -239,7 +239,7 @@ function renderOrders() {
       <section class="modal">
         <div class="inline" style="justify-content: space-between;">
           <h3>Create Order</h3>
-          <button id="close-order-modal">Close</button>
+          <button id="close-order-modal" type="button">Close</button>
         </div>
         <form id="order-form" class="grid">
           <label>Order Number<input required name="orderNumber" /></label>
@@ -274,8 +274,14 @@ function renderOrders() {
   `;
 
   const modal = document.getElementById("order-modal");
-  const openModal = () => modal.removeAttribute("hidden");
-  const closeModal = () => modal.setAttribute("hidden", "");
+  const openModal = () => {
+    modal.removeAttribute("hidden");
+    modal.classList.add("is-open");
+  };
+  const closeModal = () => {
+    modal.setAttribute("hidden", "");
+    modal.classList.remove("is-open");
+  };
 
   const addItemRow = () => {
     const row = document.createElement("div");
@@ -300,6 +306,12 @@ function renderOrders() {
   document.getElementById("close-order-modal").addEventListener("click", closeModal);
   document.getElementById("cancel-order-create").addEventListener("click", closeModal);
   document.getElementById("add-order-item").addEventListener("click", addItemRow);
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) closeModal();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (activeTab === "Orders" && e.key === "Escape" && modal.classList.contains("is-open")) closeModal();
+  });
 
   document.getElementById("order-items-list").addEventListener("click", (e) => {
     if (!e.target.classList.contains("remove-order-item")) return;
@@ -848,14 +860,31 @@ function renderPrintSlips() {
     document.getElementById("slip-preview").innerHTML = slips
       .map(
         (i) => `<article class="slip">
-      <strong>${i.title}</strong><br>
-      <span>Author: ${i.author || ""}</span><br>
-      <span>Status: ${i.status || ""}</span><br>
-      <span>Source: ${i.source || ""}</span><br>
-      ${i.memorialInfo ? `<span>Memorial: ${i.memorialInfo}</span><br>` : ""}
-      ${i.adoptedAuthorInfo ? `<span>Adopted Author: ${i.adoptedAuthorInfo}</span><br>` : ""}
-      ${i.slipNotes ? `<span>Slip Notes: ${i.slipNotes}</span><br>` : ""}
-      <span>Staff Notes: _____________________________</span>
+      <header class="slip-header">
+        <strong>${i.title}</strong>
+        <span class="badge">${i.status || "No status"}</span>
+      </header>
+      <div class="slip-meta">
+        <span><strong>Author:</strong> ${i.author || "—"}</span>
+        <span><strong>ISBN:</strong> ${i.isbn || "—"}</span>
+        <span><strong>Source:</strong> ${i.source || "—"}</span>
+        <span><strong>Order #:</strong> ${i.orderNumber || "—"}</span>
+        <span><strong>Vendor/Donor:</strong> ${i.vendor || i.donor || "—"}</span>
+        <span><strong>Received:</strong> ${i.dateReceived || i.orderDate || "—"}</span>
+      </div>
+      ${
+        i.memorialInfo || i.adoptedAuthorInfo || i.slipNotes
+          ? `<div class="slip-notes">
+            ${i.memorialInfo ? `<div><strong>Memorial:</strong> ${i.memorialInfo}</div>` : ""}
+            ${i.adoptedAuthorInfo ? `<div><strong>Adopted Author:</strong> ${i.adoptedAuthorInfo}</div>` : ""}
+            ${i.slipNotes ? `<div><strong>Slip Notes:</strong> ${i.slipNotes}</div>` : ""}
+          </div>`
+          : ""
+      }
+      <div class="slip-staff">
+        <div>Cataloged by: ____________________</div>
+        <div>Shelved by: ____________________</div>
+      </div>
     </article>`
       )
       .join("");
