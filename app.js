@@ -19,7 +19,7 @@ const LOOKUPS = {
 
 const TABS = [
   "Dashboard",
-  "Add Item",
+  "Orders",
   "Bulk Donations",
   "Items In Process",
   "Reports",
@@ -44,6 +44,7 @@ function loadState() {
   const now = new Date().toISOString();
   const defaults = {
     items: [],
+    orders: [],
     batches: [],
     history: [],
     lookupOverrides: { statuses: [], sources: [] },
@@ -62,6 +63,7 @@ function loadState() {
     ...defaults,
     ...parsed,
     items: Array.isArray(parsed?.items) ? parsed.items : [],
+    orders: Array.isArray(parsed?.orders) ? parsed.orders : [],
     batches: Array.isArray(parsed?.batches) ? parsed.batches : [],
     history: Array.isArray(parsed?.history) ? parsed.history : [],
     lookupOverrides: {
@@ -122,8 +124,8 @@ function render() {
   switch (activeTab) {
     case "Dashboard":
       return renderDashboard();
-    case "Add Item":
-      return renderAddItem();
+    case "Orders":
+      return renderOrders();
     case "Bulk Donations":
       return renderBulkDonations();
     case "Items In Process":
@@ -137,6 +139,15 @@ function render() {
     default:
       appEl.textContent = "Unknown tab";
   }
+}
+
+function escapeHtml(value = "") {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function renderDashboard() {
@@ -165,81 +176,216 @@ function renderDashboard() {
   wireRowActions();
 }
 
-function renderAddItem() {
+function renderOrders() {
   const statuses = allStatuses();
   const sources = allSources();
-  const batchOptions = state.batches.map((b) => `<option value="${b.id}">${b.batchName}</option>`).join("");
+  const activeOrders = state.orders.filter((order) => !order.archivedAt);
+  const archivedOrders = state.orders.filter((order) => order.archivedAt);
+
+  const orderRows = (orders) =>
+    orders
+      .map((order) => {
+        const orderItems = state.items.filter((item) => item.orderId === order.id);
+        const completed = orderItems.filter((item) => item.status === "Completed / Shelved").length;
+        const canArchive = orderItems.length > 0 && completed === orderItems.length;
+        const orderStatus = canArchive ? "Ready to archive" : `${completed}/${orderItems.length} complete`;
+        return `<tr>
+          <td>${escapeHtml(order.orderNumber || "—")}</td>
+          <td>${escapeHtml(order.vendor || "—")}</td>
+          <td>${escapeHtml(order.orderDate || "—")}</td>
+          <td>${orderItems.length}</td>
+          <td>${escapeHtml(orderStatus)}</td>
+          <td>${escapeHtml(order.source || "—")}</td>
+          <td>
+            ${
+              order.archivedAt
+                ? `<span class="badge ok">Archived</span>`
+                : `<button class="primary" data-archive-order="${order.id}" ${canArchive ? "" : "disabled"}>Archive</button>`
+            }
+          </td>
+        </tr>`;
+      })
+      .join("");
 
   appEl.innerHTML = `
     <section class="section">
-      <h2>Add New Item</h2>
-      <form id="item-form" class="grid">
-        <label>Title<input required name="title" /></label>
-        <label>Author<input required name="author" /></label>
-        <label>ISBN<input name="isbn" /></label>
-        <label>Format
-          <select name="format">${LOOKUPS.formats.map((f) => `<option>${f}</option>`).join("")}</select>
-        </label>
-
-        <label>Order Number<input name="orderNumber" /></label>
-        <label>Order Date<input name="orderDate" type="date" /></label>
-        <label>Vendor<input name="vendor" /></label>
-        <label>Order Price<input name="orderPrice" type="number" step="0.01" /></label>
-
-        <label>Retail Price<input name="retailPrice" type="number" step="0.01" /></label>
-        <label>Donation Source / Donor<input name="donor" /></label>
-        <label>Memorial Information<input name="memorialInfo" /></label>
-        <label>Adopted Author Information<input name="adoptedAuthorInfo" /></label>
-
-        <label>Status
-          <select name="status">${statuses.map((s) => `<option>${s}</option>`).join("")}</select>
-        </label>
-        <label>Acquisition Source
-          <select name="source">${sources.map((s) => `<option>${s}</option>`).join("")}</select>
-        </label>
-        <label>Date Received<input name="dateReceived" type="date" /></label>
-        <label>Date Completed<input name="dateCompleted" type="date" /></label>
-
-        <label>Bulk Donation Batch
-          <select name="batchId"><option value="">None</option>${batchOptions}</select>
-        </label>
-        <label>Rejection Reason<input name="rejectionReason" /></label>
-        <label>Damage Notes<input name="damageNotes" /></label>
-        <div></div>
-
-        <label style="grid-column: span 2;">Notes<textarea name="notes"></textarea></label>
-        <label style="grid-column: span 1;">Processing Notes<textarea name="processingNotes"></textarea></label>
-        <label style="grid-column: span 1;">Slip Notes<textarea name="slipNotes"></textarea></label>
-
-        <div class="inline" style="grid-column: span 4; justify-content: flex-end;">
-          <button type="reset">Reset</button>
-          <button type="submit" class="primary">Save Item</button>
-        </div>
-      </form>
+      <div class="inline" style="justify-content: space-between;">
+        <h2>Orders Overview</h2>
+        <button id="open-order-modal" class="primary">Add Order</button>
+      </div>
+      <p class="subhead">Create one order and add multiple items that share the same order details.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Order #</th><th>Vendor</th><th>Order Date</th><th>Items</th><th>Progress</th><th>Source</th><th>Actions</th></tr>
+          </thead>
+          <tbody>${orderRows(activeOrders) || `<tr><td colspan="7">No active orders yet.</td></tr>`}</tbody>
+        </table>
+      </div>
     </section>
+    <section class="section">
+      <h3>Archived Orders</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Order #</th><th>Vendor</th><th>Order Date</th><th>Items</th><th>Progress</th><th>Source</th><th>Actions</th></tr>
+          </thead>
+          <tbody>${orderRows(archivedOrders) || `<tr><td colspan="7">No archived orders.</td></tr>`}</tbody>
+        </table>
+      </div>
+    </section>
+
+    <div id="order-modal" class="modal-backdrop" hidden>
+      <section class="modal">
+        <div class="inline" style="justify-content: space-between;">
+          <h3>Create Order</h3>
+          <button id="close-order-modal">Close</button>
+        </div>
+        <form id="order-form" class="grid">
+          <label>Order Number<input required name="orderNumber" /></label>
+          <label>Order Date<input required name="orderDate" type="date" value="${isoDate()}" /></label>
+          <label>Vendor<input required name="vendor" /></label>
+          <label>Order Price (per item)<input name="orderPrice" type="number" step="0.01" /></label>
+          <label>Status
+            <select name="status">${statuses.map((s) => `<option ${s === "Ordered" ? "selected" : ""}>${s}</option>`)}</select>
+          </label>
+          <label>Acquisition Source
+            <select name="source">${sources.map((s) => `<option>${s}</option>`)}</select>
+          </label>
+          <label>Donation Source / Donor<input name="donor" /></label>
+          <label>Date Received<input name="dateReceived" type="date" /></label>
+          <label style="grid-column: span 4;">Order Notes<textarea name="notes"></textarea></label>
+
+          <div style="grid-column: span 4;">
+            <div class="inline" style="justify-content: space-between;">
+              <h4>Items in this order</h4>
+              <button id="add-order-item" type="button">Add Item Row</button>
+            </div>
+            <div id="order-items-list" class="order-items-list"></div>
+          </div>
+
+          <div class="inline" style="grid-column: span 4; justify-content: flex-end;">
+            <button type="button" id="cancel-order-create">Cancel</button>
+            <button type="submit" class="primary">Save Order</button>
+          </div>
+        </form>
+      </section>
+    </div>
   `;
 
-  const form = document.getElementById("item-form");
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const fd = new FormData(form);
-    const item = {
-      id: id("item"),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    fd.forEach((v, k) => (item[k] = String(v).trim()));
+  const modal = document.getElementById("order-modal");
+  const openModal = () => modal.removeAttribute("hidden");
+  const closeModal = () => modal.setAttribute("hidden", "");
 
-    state.items.push(item);
-    state.history.push({
-      id: id("hist"),
-      itemId: item.id,
-      timestamp: new Date().toISOString(),
-      action: `Item created with status ${item.status}`
+  const addItemRow = () => {
+    const row = document.createElement("div");
+    row.className = "order-item-row";
+    row.innerHTML = `
+      <label>Title<input required name="itemTitle" /></label>
+      <label>Author<input required name="itemAuthor" /></label>
+      <label>ISBN<input name="itemIsbn" /></label>
+      <label>Format
+        <select name="itemFormat">${LOOKUPS.formats.map((f) => `<option>${f}</option>`).join("")}</select>
+      </label>
+      <label>Retail Price<input name="itemRetailPrice" type="number" step="0.01" /></label>
+      <button type="button" class="danger remove-order-item">Remove</button>
+    `;
+    document.getElementById("order-items-list").appendChild(row);
+  };
+
+  document.getElementById("open-order-modal").addEventListener("click", () => {
+    openModal();
+    if (!document.querySelector("#order-items-list .order-item-row")) addItemRow();
+  });
+  document.getElementById("close-order-modal").addEventListener("click", closeModal);
+  document.getElementById("cancel-order-create").addEventListener("click", closeModal);
+  document.getElementById("add-order-item").addEventListener("click", addItemRow);
+
+  document.getElementById("order-items-list").addEventListener("click", (e) => {
+    if (!e.target.classList.contains("remove-order-item")) return;
+    const rows = document.querySelectorAll("#order-items-list .order-item-row");
+    if (rows.length === 1) return;
+    e.target.closest(".order-item-row")?.remove();
+  });
+
+  document.querySelectorAll("button[data-archive-order]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const order = state.orders.find((entry) => entry.id === btn.dataset.archiveOrder);
+      if (!order) return;
+      const orderItems = state.items.filter((item) => item.orderId === order.id);
+      const allCompleted = orderItems.length > 0 && orderItems.every((item) => item.status === "Completed / Shelved");
+      if (!allCompleted) {
+        alert("All items in this order must be completed before archiving.");
+        return;
+      }
+      order.archivedAt = new Date().toISOString();
+      order.updatedAt = new Date().toISOString();
+      saveState();
+      renderOrders();
     });
+  });
+
+  document.getElementById("order-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const rowEls = [...document.querySelectorAll("#order-items-list .order-item-row")];
+    const orderItems = rowEls.map((row) => ({
+      title: row.querySelector('[name="itemTitle"]').value.trim(),
+      author: row.querySelector('[name="itemAuthor"]').value.trim(),
+      isbn: row.querySelector('[name="itemIsbn"]').value.trim(),
+      format: row.querySelector('[name="itemFormat"]').value.trim(),
+      retailPrice: row.querySelector('[name="itemRetailPrice"]').value.trim()
+    }));
+
+    if (orderItems.some((entry) => !entry.title || !entry.author)) {
+      alert("Each order item row requires a title and author.");
+      return;
+    }
+
+    const fd = new FormData(form);
+    const now = new Date().toISOString();
+    const order = {
+      id: id("order"),
+      createdAt: now,
+      updatedAt: now,
+      archivedAt: "",
+      itemIds: []
+    };
+    fd.forEach((v, k) => (order[k] = String(v).trim()));
+    state.orders.push(order);
+
+    orderItems.forEach((entry) => {
+      const item = {
+        id: id("item"),
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        orderDate: order.orderDate,
+        vendor: order.vendor,
+        orderPrice: order.orderPrice,
+        status: order.status,
+        source: order.source,
+        donor: order.donor,
+        dateReceived: order.dateReceived,
+        notes: order.notes,
+        createdAt: now,
+        updatedAt: now,
+        ...entry
+      };
+      state.items.push(item);
+      order.itemIds.push(item.id);
+      state.history.push({
+        id: id("hist"),
+        itemId: item.id,
+        timestamp: now,
+        action: `Item created from order ${order.orderNumber || order.id} with status ${item.status}`
+      });
+    });
+
     saveState();
     form.reset();
-    alert("Item saved.");
+    document.getElementById("order-items-list").innerHTML = "";
+    closeModal();
+    renderOrders();
   });
 }
 
